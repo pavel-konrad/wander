@@ -1,4 +1,4 @@
-// Wander's editor, laid out like Ableton's Drift: a header bar, then Osc / Osc Mix / Filter / Envelopes /
+// Wander's editor: a header bar, then Osc / Osc Mix / Filter / Envelopes /
 // LFO / global columns, drawn on a 1060 x 250 layout and scaled to the window.
 #pragma once
 #include "PluginProcessor.h"
@@ -10,6 +10,7 @@ namespace look
 enum Accent { grey = 0, orange = 1, blue = 2, pink = 3 };
 juce::Colour accent (int a);
 juce::Font font (float size, bool bold = false);
+juce::Font mono (float size);
 }
 
 class WanderLook final : public juce::LookAndFeel_V4
@@ -37,7 +38,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };
 
-// A value field filled to its value, like Drift's percentage boxes: drag up or down.
+// A value field filled to its value: drag up or down.
 class ValueBox final : public juce::Component
 {
 public:

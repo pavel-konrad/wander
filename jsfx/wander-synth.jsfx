@@ -179,25 +179,25 @@ sc_pos += 1;
 sc_pos >= sc_len ? sc_pos = 0;
 
 @gfx 1060 250
-// ---- the GUI, laid out like Ableton's Drift: a header bar, then Osc / Osc Mix / Filter /
+// ---- the GUI, in the palette of Bassonator and Voicenator: a header bar, then Osc / Osc Mix / Filter /
 // Envelopes / LFO / global columns. Knobs: drag up or down (Shift: finer), wheel, double-click for
 // the default. Value boxes: the same, drag up or down. Choices (wave, filter type, LFO shape):
 // click for a menu. Every variable here starts with g_: @gfx runs beside the audio and shares them.
 
 // colours
-function c_frame()  ( gfx_set(0.086, 0.086, 0.086, 1); );
-function c_panel()  ( gfx_set(0.141, 0.141, 0.141, 1); );
-function c_well()   ( gfx_set(0.067, 0.067, 0.067, 1); );
-function c_head()   ( gfx_set(0.647, 0.839, 0.910, 1); );
-function c_ink()    ( gfx_set(0.098, 0.098, 0.098, 1); );
-function c_label()  ( gfx_set(0.741, 0.741, 0.741, 1); );
-function c_value()  ( gfx_set(0.860, 0.860, 0.860, 1); );
-function c_track()  ( gfx_set(0.310, 0.310, 0.310, 1); );
-function c_grey()   ( gfx_set(0.600, 0.600, 0.600, 1); );
+function c_frame()  ( gfx_set(0.047, 0.051, 0.063, 1); );
+function c_panel()  ( gfx_set(0.075, 0.082, 0.102, 1); );
+function c_well()   ( gfx_set(0.059, 0.067, 0.078, 1); );
+function c_head()   ( gfx_set(0.075, 0.082, 0.102, 1); );
+function c_ink()    ( gfx_set(0.047, 0.051, 0.063, 1); );
+function c_label()  ( gfx_set(0.502, 0.522, 0.561, 1); );
+function c_value()  ( gfx_set(0.914, 0.902, 0.875, 1); );
+function c_track()  ( gfx_set(0.137, 0.149, 0.176, 1); );
+function c_grey()   ( gfx_set(0.502, 0.522, 0.561, 1); );
 function c_pick(c)  (
-  c == 1 ? gfx_set(0.957, 0.639, 0.251, 1) :      // orange: osc 1
-  c == 2 ? gfx_set(0.353, 0.706, 0.839, 1) :      // blue: osc 2, the default accent
-  c == 3 ? gfx_set(0.910, 0.416, 0.498, 1) :      // pink: noise
+  c == 1 ? gfx_set(1.0, 0.420, 0.208, 1) :        // orange: osc 1, the family accent
+  c == 2 ? gfx_set(0.788, 0.824, 0.871, 1) :      // steel: osc 2
+  c == 3 ? gfx_set(0.847, 0.831, 0.800, 1) :      // ivory: noise
   c_grey();
 );
 
@@ -269,7 +269,7 @@ function g_shape(wave, lfo, x, y, w, h) local(i, t, v, px, py, nx, ny) (
   );
 );
 
-// an envelope: attack, decay, a held sustain, release; handles at the corners like Drift
+// an envelope: attack, decay, a held sustain, release; handles at the corners
 function g_env(x, y, w, h, a, d, s, r, col, bright) local(ta, td, th, tr, sc, x1, x2, x3) (
   ta = sqrt(a); td = sqrt(d); th = 0.6; tr = sqrt(r);
   sc = w / (ta + td + th + tr);
@@ -405,15 +405,15 @@ g_lastdown = g_down;
 // ---- frame, header bar and column panels
 c_frame(); gfx_rect(0, 0, gfx_w, gfx_h);
 c_head(); gfx_rect(0, 0, gfx_w, 22 * g_s);
-c_pick(1); gfx_circle(14 * g_s, 11 * g_s, 6 * g_s, 1, 1);
-c_ink(); gfx_circle(14 * g_s, 11 * g_s, 6 * g_s, 0, 1);
-gfx_setfont(4); c_ink(); g_text("Wander", 26 * g_s, 3 * g_s);
-gfx_setfont(2);
-g_ctext("Osc Mix", 318 * g_s, 4 * g_s); g_ctext("Filter", 443 * g_s, 4 * g_s);
-g_ctext("Envelopes", 672 * g_s, 4 * g_s); g_ctext("LFO", 878 * g_s, 4 * g_s);
+c_track(); gfx_rect(0, 22 * g_s, gfx_w, 1 * g_s);
+c_pick(1); gfx_circle(13 * g_s, 11 * g_s, 4 * g_s, 1, 1);
+gfx_setfont(4); c_value(); g_text("WANDER", 24 * g_s, 3 * g_s);
+gfx_setfont(1); c_label();
+g_ctext("OSC MIX", 318 * g_s, 5 * g_s); g_ctext("FILTER", 443 * g_s, 5 * g_s);
+g_ctext("ENVELOPES", 672 * g_s, 5 * g_s); g_ctext("LFO", 878 * g_s, 5 * g_s);
 // voices: one dot per voice, lit while it sounds
 g_i = 0;
-loop(VN, v_astg[g_i] > 0 ? c_pick(1) : c_ink(); gfx_circle((960 + g_i * 11) * g_s, 11 * g_s, 3 * g_s, 1, 1); g_i += 1; );
+loop(VN, v_astg[g_i] > 0 ? c_pick(1) : c_track(); gfx_circle((960 + g_i * 11) * g_s, 11 * g_s, 3 * g_s, 1, 1); g_i += 1; );
 
 g_panel(6, 26, 262, 68); g_panel(6, 96, 262, 70); g_panel(6, 168, 262, 78);
 g_panel(272, 26, 92, 220);

@@ -4,30 +4,36 @@
 // ---------------------------------------------------------------- colours and type
 namespace colour
 {
-const juce::Colour frame { 0xff161616 };
-const juce::Colour panel { 0xff242424 };
-const juce::Colour well { 0xff111111 };
-const juce::Colour head { 0xffa5d6e8 };
-const juce::Colour ink { 0xff191919 };
-const juce::Colour label { 0xffbdbdbd };
-const juce::Colour value { 0xffdbdbdb };
-const juce::Colour track { 0xff4f4f4f };
+// the palette of Bassonator and Voicenator, so the plugins look like one family
+const juce::Colour frame { 0xff0c0d10 };
+const juce::Colour panel { 0xff13151a };
+const juce::Colour well { 0xff0f1114 };
+const juce::Colour line { 0xff23262d };
+const juce::Colour ink { 0xff0c0d10 };
+const juce::Colour label { 0xff80858f };
+const juce::Colour value { 0xffe9e6df };
+const juce::Colour track { 0xff23262d };
 }
 
 juce::Colour look::accent (int a)
 {
     switch (a)
     {
-        case orange: return juce::Colour (0xfff4a340);
-        case blue:   return juce::Colour (0xff5ab4d6);
-        case pink:   return juce::Colour (0xffe86a7f);
-        default:     return juce::Colour (0xff9a9a9a);
+        case orange: return juce::Colour (0xffff6b35);   // the family accent
+        case blue:   return juce::Colour (0xffc9d2de);   // cool steel
+        case pink:   return juce::Colour (0xffd8d4cc);   // warm ivory (noise)
+        default:     return juce::Colour (0xff80858f);
     }
 }
 
 juce::Font look::font (float size, bool bold)
 {
     return juce::Font (juce::FontOptions ("Avenir Next", size, bold ? juce::Font::bold : juce::Font::plain));
+}
+
+juce::Font look::mono (float size)
+{
+    return juce::Font (juce::FontOptions ("Menlo", size, juce::Font::plain));
 }
 
 namespace
@@ -79,7 +85,7 @@ void WanderLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h
     juce::Path track;
     track.addCentredArc (c.x, c.y, r, r, 0, start, end, true);
     g.setColour (colour::track);
-    g.strokePath (track, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+    g.strokePath (track, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     const double lo = s.getMinimum(), hi = s.getMaximum();
     const float zero = (lo < 0 && hi > 0) ? start + (float) s.valueToProportionOfLength (0) * (end - start) : start;
@@ -87,11 +93,16 @@ void WanderLook::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h
     {
         juce::Path arc;
         arc.addCentredArc (c.x, c.y, r, r, 0, juce::jmin (zero, angle), juce::jmax (zero, angle), true);
-        g.setColour (s.isMouseOverOrDragging() ? accent.brighter (0.25f) : accent);
-        g.strokePath (arc, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+        g.setColour (s.isMouseOverOrDragging() ? accent.brighter (0.2f) : accent);
+        g.strokePath (arc, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
-    g.setColour (s.isMouseOverOrDragging() ? accent.brighter (0.25f) : accent);
-    g.drawLine ({ c, c.getPointOnCircumference (r, angle) }, 2.0f);
+    const float body = r - 5;
+    g.setColour (colour::panel.brighter (0.06f));
+    g.fillEllipse (juce::Rectangle<float> (body * 2, body * 2).withCentre (c));
+    g.setColour (colour::line.brighter (0.15f));
+    g.drawEllipse (juce::Rectangle<float> (body * 2, body * 2).withCentre (c), 1);
+    g.setColour (colour::value);
+    g.drawLine ({ c.getPointOnCircumference (body * 0.35f, angle), c.getPointOnCircumference (body - 3, angle) }, 2);
 }
 
 void WanderLook::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float, float, float,
@@ -131,7 +142,7 @@ void Knob::paint (juce::Graphics& g)
     g.setFont (look::font (12.5f));
     g.setColour (colour::label);
     g.drawText (label, getLocalBounds().removeFromTop (16), juce::Justification::centred);
-    g.setFont (look::font (11.5f));
+    g.setFont (look::mono (10.5f));
     g.setColour (accent == look::grey ? colour::value : look::accent (accent));
     g.drawText (textOf (param), getLocalBounds().removeFromBottom (16), juce::Justification::centred);
 }
@@ -170,7 +181,7 @@ public:
     explicit BoxText (juce::RangedAudioParameter* p) : param (p) { setInterceptsMouseClicks (false, false); }
     void paint (juce::Graphics& g) override
     {
-        g.setFont (look::font (11.5f));
+        g.setFont (look::mono (10.5f));
         g.setColour (colour::value);
         g.drawText (textOf (param), getLocalBounds(), juce::Justification::centred);
     }
@@ -278,25 +289,28 @@ public:
         g.fillAll (colour::frame);
 
         // header
-        g.setColour (colour::head);
+        g.setColour (colour::panel);
         g.fillRect (0, 0, baseWidth, 22);
+        g.setColour (colour::line);
+        g.fillRect (0, 22, baseWidth, 1);
         g.setColour (look::accent (look::orange));
-        g.fillEllipse (8, 5, 12, 12);
-        g.setColour (colour::ink);
-        g.drawEllipse (8, 5, 12, 12, 1);
-        g.setFont (look::font (14, true));
-        g.drawText ("Wander", 26, 0, 80, 22, juce::Justification::centredLeft);
-        g.setFont (look::font (12.5f));
-        g.drawText ("Osc Mix", 272, 0, 92, 22, juce::Justification::centred);
-        g.drawText ("Filter", 368, 0, 150, 22, juce::Justification::centred);
-        g.drawText ("Envelopes", 522, 0, 300, 22, juce::Justification::centred);
+        g.fillEllipse (9, 7, 8, 8);
+        g.setColour (colour::value);
+        g.setFont (look::font (13.5f, true).withExtraKerningFactor (0.22f));
+        g.drawText ("WANDER", 24, 0, 90, 22, juce::Justification::centredLeft);
+        g.setColour (colour::label);
+        g.setFont (look::font (10.5f, true).withExtraKerningFactor (0.18f));
+        g.drawText ("OSC MIX", 272, 0, 92, 22, juce::Justification::centred);
+        g.drawText ("FILTER", 368, 0, 150, 22, juce::Justification::centred);
+        g.drawText ("ENVELOPES", 522, 0, 300, 22, juce::Justification::centred);
         g.drawText ("LFO", 826, 0, 104, 22, juce::Justification::centred);
+        g.setColour (look::accent (look::orange));
         g.setFont (look::font (12.5f, true));
         g.drawText (presetName(), presetArea(), juce::Justification::centredLeft);
         // one dot per voice, lit while it sounds
         for (int v = 0; v < wander::numVoices; ++v)
         {
-            g.setColour (proc.voiceOn[(size_t) v] ? look::accent (look::orange) : colour::ink.withAlpha (0.55f));
+            g.setColour (proc.voiceOn[(size_t) v] ? look::accent (look::orange) : colour::line.brighter (0.2f));
             g.fillEllipse (958.0f + (float) v * 11, 8, 6, 6);
         }
 
@@ -410,7 +424,11 @@ private:
             typeLabelY = y - 16;
     }
 
-    static void panel (juce::Graphics& g, int x, int y, int w, int h) { g.setColour (colour::panel); g.fillRect (x, y, w, h); }
+    static void panel (juce::Graphics& g, int x, int y, int w, int h)
+    {
+        g.setColour (colour::panel); g.fillRect (x, y, w, h);
+        g.setColour (colour::line); g.drawRect (x, y, w, h, 1);
+    }
     static void well (juce::Graphics& g, int x, int y, int w, int h) { g.setColour (colour::well); g.fillRect (x, y, w, h); }
     static void square (juce::Graphics& g, int x, int y, const juce::String& t, int accent)
     {

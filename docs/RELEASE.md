@@ -1,5 +1,5 @@
 **Wander** is a free eight-voice synthesiser: two oscillators and noise, a filter, two envelopes, an LFO,
-and drift, laid out like Ableton's Drift.
+and drift.
 
 | Download | For |
 |---|---|

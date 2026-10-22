@@ -1,8 +1,8 @@
 # Wander
 
-A free eight-voice synthesiser in the spirit of "two oscillators, a filter and some drift", laid out
-like Ableton's Drift. VST3 and AU for macOS (Apple Silicon and Intel), VST3 for Windows, a standalone
-app, and a JSFX version for REAPER.
+A free eight-voice synthesiser: two oscillators and noise, a filter, two envelopes, an LFO, and some
+drift. VST3 and AU for macOS (Apple Silicon and Intel), VST3 for Windows, a standalone app, and a JSFX
+version for REAPER.
 
 ![Wander](docs/wander.png)
 
