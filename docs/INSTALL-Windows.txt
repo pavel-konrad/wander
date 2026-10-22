@@ -1,0 +1,17 @@
+Wander for Windows (64-bit)
+
+1. Copy the folder Wander.vst3 to
+     C:\Program Files\Common Files\VST3\
+   (Windows asks for administrator permission; allow it.)
+   Wander.exe is the same synth as a standalone app; put it anywhere.
+
+2. Restart your DAW (or rescan plugins).
+   Ableton Live: Options > Preferences > Plug-Ins > Use VST3 Plug-In System Folders: On, then Rescan.
+                 Browser > Plug-Ins > Pavel Konrad > Wander, drop it on a MIDI track.
+   REAPER:       Insert > Virtual instrument on new track, search "Wander".
+   FL Studio:    Options > Manage plugins > Find plugins, then Add > Wander.
+
+Windows may warn once that the publisher is unknown (the plugin is not code-signed); that is expected.
+
+Presets: the menu next to the name in Wander's header (Bass, Pad, Sonar ping, Submarine engine, Sea,
+Steam, Knock), also the host's program list.

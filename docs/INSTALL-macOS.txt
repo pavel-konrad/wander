@@ -1,0 +1,19 @@
+Wander for macOS (Apple Silicon and Intel)
+
+1. Copy the plugins into your user plugin folders (in Finder: Go > Go to Folder..., paste the path):
+     Wander.vst3       ->  ~/Library/Audio/Plug-Ins/VST3/
+     Wander.component  ->  ~/Library/Audio/Plug-Ins/Components/
+   Wander.app is the same synth as a standalone app; put it anywhere (Applications).
+
+2. Wander is not signed with an Apple Developer ID, so macOS blocks files downloaded from the
+   internet. Open Terminal and run this once:
+     xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Wander.vst3 ~/Library/Audio/Plug-Ins/Components/Wander.component
+
+3. Restart your DAW (or rescan plugins).
+   Ableton Live: Settings > Plug-Ins > Use VST3 Plug-In System Folders: On, then Rescan.
+                 Browser > Plug-Ins > Pavel Konrad > Wander, drop it on a MIDI track.
+   REAPER:       Insert > Virtual instrument on new track, search "Wander".
+   Logic Pro:    an instrument slot > AU Instruments > Pavel Konrad > Wander.
+
+Presets: the menu next to the name in Wander's header (Bass, Pad, Sonar ping, Submarine engine, Sea,
+Steam, Knock), also the host's program list.

@@ -1,0 +1,515 @@
+desc:Wander Synth (sound-synthesis.course)
+// A small analog-style synthesiser in the spirit of "two oscillators, a filter and some drift":
+//   2 oscillators + noise  ->  filter  ->  amp
+//   an amp envelope, a mod envelope (to cutoff and pitch), one LFO, and "drift": every voice
+//   wanders a little in pitch and cutoff on its own, like an old analog synth.
+// Eight voices, MIDI in, stereo out. Every block below is one idea; read it top to bottom.
+//
+// Install: copy into REAPER's Effects folder (Options > Show REAPER resource path), then on a
+// track: FX > JS: Wander Synth. Record-arm the track or put a MIDI item on it.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+// ---- oscillators
+slider1:2<0,3,1{Sine,Triangle,Saw,Pulse}>-Osc 1 wave
+slider2:0<-2,2,1>-Osc 1 octave
+slider3:0.5<0.05,0.95,0.01>-Osc 1 pulse width
+slider4:2<0,3,1{Sine,Triangle,Saw,Pulse}>-Osc 2 wave
+slider5:0<-2,2,1>-Osc 2 octave
+slider6:7<-100,100,0.1>-Osc 2 detune (cents)
+slider7:0.5<0,1,0.01>-Osc 1 level
+slider8:0<0,1,0.01>-Noise level
+// ---- filter
+slider9:0<0,2,1{Low-pass,High-pass,Band-pass}>-Filter type
+slider10:1200<20,18000,1:log>-Cutoff (Hz)
+slider11:0.2<0,1,0.01>-Resonance
+slider12:0.5<0,1,0.01>-Key tracking
+slider13:2<-6,6,0.01>-Mod env -> cutoff (octaves)
+// ---- amp envelope
+slider14:0.005<0.001,5,0.001:log>-Amp attack (s)
+slider15:0.3<0.001,5,0.001:log>-Amp decay (s)
+slider16:0.7<0,1,0.01>-Amp sustain
+slider17:0.4<0.001,8,0.001:log>-Amp release (s)
+// ---- mod envelope
+slider18:0.001<0.001,5,0.001:log>-Mod attack (s)
+slider19:0.4<0.001,5,0.001:log>-Mod decay (s)
+slider20:0<0,1,0.01>-Mod sustain
+slider21:0.4<0.001,8,0.001:log>-Mod release (s)
+slider22:0<-24,24,0.01>-Mod env -> pitch (semitones)
+// ---- LFO
+slider23:4<0.01,30,0.01:log>-LFO rate (Hz)
+slider24:0<0,4,1{Sine,Triangle,Saw down,Square,Random}>-LFO wave
+slider25:0<0,100,0.1>-LFO -> pitch (cents)
+slider26:0<0,4,0.01>-LFO -> cutoff (octaves)
+slider27:0<0,0.45,0.01>-LFO -> pulse width
+// ---- the rest
+slider28:0.3<0,1,0.01>-Drift
+slider29:0.5<0,1,0.01>-Velocity -> level
+slider30:-12<-48,6,0.1>-Volume (dB)
+slider31:0.5<0,1,0.01>-Osc 2 level
+
+@init
+VN = 8;                      // voices
+v_note  = 0;    v_vel   = 16;  v_gate  = 32;  v_age   = 48;
+v_aenv  = 64;   v_astg  = 80;  v_menv  = 96;  v_mstg  = 112;
+v_ph1   = 128;  v_ph2   = 144; v_ic1   = 160; v_ic2   = 176;
+v_drp   = 192;  v_drc   = 208;
+memset(0, 0, 256);
+lfo_ph = 0; lfo_rnd = 0; clock = 0;
+
+// time constant -> per-sample step of an exponential approach (99 % of the way in t seconds)
+function coef(t) ( 1 - exp(-4.6 / (max(t, 0.001) * srate)) );
+
+// PolyBLEP: rounds off the jump in a saw or pulse so it does not alias (whistle) at high notes.
+function blep(t, dt) (
+  t < dt ? ( t /= dt; t + t - t * t - 1 ) :
+  t > 1 - dt ? ( t = (t - 1) / dt; t * t + t + t + 1 ) : 0;
+);
+
+// One sample of a wave at phase ph (0..1), phase step dt, pulse width pw.
+function osc(ph, dt, wave, pw) local(v, p2) (
+  wave == 0 ? v = sin(2 * $pi * ph) :
+  wave == 1 ? v = 1 - 4 * abs(ph - 0.5) :
+  wave == 2 ? ( v = 2 * ph - 1; v -= blep(ph, dt); ) :
+  ( v = ph < pw ? 1 : -1;
+    v += blep(ph, dt);
+    p2 = ph - pw; p2 < 0 ? p2 += 1;
+    v -= blep(p2, dt); );
+  v;
+);
+
+// Values that follow from the sliders. Called from @slider and from @block, because a change
+// made in the GUI does not run @slider.
+function update() (
+  a_att = 1 / (max(slider14, 0.001) * srate);   a_dec = coef(slider15);  a_rel = coef(slider17);
+  m_att = 1 / (max(slider18, 0.001) * srate);   m_dec = coef(slider19);  m_rel = coef(slider21);
+  k = 2 - 1.96 * slider11;                      // filter damping: 2 = no resonance, near 0 = rings
+  vol = 10 ^ (slider30 / 20);
+);
+
+// the scope: the last 4096 output samples, written in @sample, drawn in @gfx
+sc_buf = 30000; sc_len = 4096; sc_pos = 0;
+
+@slider
+update();
+
+@block
+update();
+// MIDI: a note on takes a free voice (or the oldest), a note off sends its voice to release.
+while (midirecv(ofs, m1, m2, m3)) (
+  st = m1 & $xF0;
+  st == $x90 && m3 > 0 ? (
+    best = 0; besta = -1; i = 0;
+    loop(VN,
+      v_astg[i] == 0 ? ( best = i; besta = 1000000000; ) :
+      besta < 1000000000 && v_age[i] > besta ? ( best = i; besta = v_age[i]; );
+      i += 1;
+    );
+    v_note[best] = m2; v_vel[best] = m3 / 127; v_gate[best] = 1; v_age[best] = 0;
+    v_astg[best] = 1; v_mstg[best] = 1; v_menv[best] = 0;
+  ) : (st == $x80 || (st == $x90 && m3 == 0)) ? (
+    i = 0;
+    loop(VN, v_note[i] == m2 && v_gate[i] ? ( v_gate[i] = 0; v_astg[i] = 4; v_mstg[i] = 4; ); i += 1; );
+  ) : (st == $xB0 && (m2 == 123 || m2 == 120)) ? (
+    i = 0; loop(VN, v_gate[i] = 0; v_astg[i] = 4; v_mstg[i] = 4; i += 1; );
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+@sample
+// ---- LFO, one for all voices: a value from -1 to 1
+lfo_ph += slider23 / srate;
+lfo_ph >= 1 ? ( lfo_ph -= 1; lfo_rnd = rand(2) - 1; );
+lfo = slider24 == 0 ? sin(2 * $pi * lfo_ph) :
+      slider24 == 1 ? 1 - 4 * abs(lfo_ph - 0.5) :
+      slider24 == 2 ? 1 - 2 * lfo_ph :
+      slider24 == 3 ? (lfo_ph < 0.5 ? 1 : -1) : lfo_rnd;
+
+out = 0;
+i = 0;
+loop(VN,
+  v_astg[i] > 0 ? (
+    v_age[i] += 1;
+    // ---- amp envelope: 1 attack (straight up), 2 decay to sustain, 4 release to 0
+    v_astg[i] == 1 ? ( v_aenv[i] += a_att; v_aenv[i] >= 1 ? ( v_aenv[i] = 1; v_astg[i] = 2; ); ) :
+    v_astg[i] == 2 ? ( v_aenv[i] += (slider16 - v_aenv[i]) * a_dec; ) :
+    ( v_aenv[i] += -v_aenv[i] * a_rel; v_aenv[i] < 0.00005 ? ( v_aenv[i] = 0; v_astg[i] = 0; ); );
+    // ---- mod envelope, same shape, its own times
+    v_mstg[i] == 1 ? ( v_menv[i] += m_att; v_menv[i] >= 1 ? ( v_menv[i] = 1; v_mstg[i] = 2; ); ) :
+    v_mstg[i] == 2 ? ( v_menv[i] += (slider20 - v_menv[i]) * m_dec; ) :
+    ( v_menv[i] += -v_menv[i] * m_rel; );
+    // ---- drift: each voice's own slow random walk, pulled back towards 0
+    v_drp[i] = v_drp[i] * 0.99995 + (rand(2) - 1) * 0.004;
+    v_drc[i] = v_drc[i] * 0.99995 + (rand(2) - 1) * 0.004;
+    dp = v_drp[i] * slider28 * 0.25;            // up to about a quarter of a semitone
+    dc = v_drc[i] * slider28 * 0.5;             // up to about half an octave of cutoff
+    // ---- pitch in semitones from A4, then frequency
+    semis = v_note[i] - 69 + v_menv[i] * slider22 + lfo * slider25 / 100 + dp;
+    f1 = 440 * 2 ^ ((semis + 12 * slider2) / 12);
+    f2 = 440 * 2 ^ ((semis + 12 * slider5 + slider6 / 100) / 12);
+    dt1 = min(f1 / srate, 0.45); dt2 = min(f2 / srate, 0.45);
+    pw = max(0.05, min(0.95, slider3 + lfo * slider27));
+    o1 = osc(v_ph1[i], dt1, slider1, pw);
+    o2 = osc(v_ph2[i], dt2, slider4, pw);
+    v_ph1[i] += dt1; v_ph1[i] >= 1 ? v_ph1[i] -= 1;
+    v_ph2[i] += dt2; v_ph2[i] >= 1 ? v_ph2[i] -= 1;
+    x = o1 * slider7 + o2 * slider31 + (rand(2) - 1) * slider8;        // the mixer: three levels
+    // ---- filter: a state-variable filter (Zavalishin's TPT form), stable at any setting
+    fc = slider10 * 2 ^ (v_menv[i] * slider13 + lfo * slider26 + dc + slider12 * (v_note[i] - 60) / 12);
+    fc = max(20, min(fc, srate * 0.45));
+    g = tan($pi * fc / srate);
+    bp = (v_ic1[i] + g * (x - v_ic2[i])) / (1 + g * (g + k));
+    lp = v_ic2[i] + g * bp;
+    v_ic1[i] = 2 * bp - v_ic1[i];
+    v_ic2[i] = 2 * lp - v_ic2[i];
+    hp = x - k * bp - lp;
+    y = slider9 == 0 ? lp : slider9 == 1 ? hp : bp;
+    // ---- amp
+    out += y * v_aenv[i] * (1 - slider29 + slider29 * v_vel[i]);
+  );
+  i += 1;
+);
+out *= vol;
+out = out / (1 + abs(out));                     // soft limit: never clips hard
+spl0 = spl1 = out;
+sc_buf[sc_pos] = out;
+sc_pos += 1;
+sc_pos >= sc_len ? sc_pos = 0;
+
+@gfx 1060 250
+// ---- the GUI, laid out like Ableton's Drift: a header bar, then Osc / Osc Mix / Filter /
+// Envelopes / LFO / global columns. Knobs: drag up or down (Shift: finer), wheel, double-click for
+// the default. Value boxes: the same, drag up or down. Choices (wave, filter type, LFO shape):
+// click for a menu. Every variable here starts with g_: @gfx runs beside the audio and shares them.
+
+// colours
+function c_frame()  ( gfx_set(0.086, 0.086, 0.086, 1); );
+function c_panel()  ( gfx_set(0.141, 0.141, 0.141, 1); );
+function c_well()   ( gfx_set(0.067, 0.067, 0.067, 1); );
+function c_head()   ( gfx_set(0.647, 0.839, 0.910, 1); );
+function c_ink()    ( gfx_set(0.098, 0.098, 0.098, 1); );
+function c_label()  ( gfx_set(0.741, 0.741, 0.741, 1); );
+function c_value()  ( gfx_set(0.860, 0.860, 0.860, 1); );
+function c_track()  ( gfx_set(0.310, 0.310, 0.310, 1); );
+function c_grey()   ( gfx_set(0.600, 0.600, 0.600, 1); );
+function c_pick(c)  (
+  c == 1 ? gfx_set(0.957, 0.639, 0.251, 1) :      // orange: osc 1
+  c == 2 ? gfx_set(0.353, 0.706, 0.839, 1) :      // blue: osc 2, the default accent
+  c == 3 ? gfx_set(0.910, 0.416, 0.498, 1) :      // pink: noise
+  c_grey();
+);
+
+function g_ctext(str, cx, ty) local(w, h) ( gfx_measurestr(str, w, h); gfx_x = cx - w / 2; gfx_y = ty; gfx_drawstr(str); );
+function g_text(str, x, y) ( gfx_x = x; gfx_y = y; gfx_drawstr(str); );
+function g_set(sl, v) ( slider(sl) = v; slider_automate(2 ^ (sl - 1)); );
+
+function g_norm(n, v) local(mn, mx) (
+  mn = g_wmin[n]; mx = g_wmax[n];
+  g_wlog[n] ? log(max(v, mn) / mn) / log(mx / mn) : (v - mn) / (mx - mn);
+);
+function g_denorm(n, t) (
+  t = max(0, min(1, t));
+  g_wlog[n] ? g_wmin[n] * (g_wmax[n] / g_wmin[n]) ^ t : g_wmin[n] + t * (g_wmax[n] - g_wmin[n]);
+);
+
+function g_fmt(n, v) local(f) (
+  f = g_wfmt[n];
+  f == 1 ? ( v >= 1000 ? sprintf(#g_val, "%.1f kHz", v / 1000) : sprintf(#g_val, "%.0f Hz", v) ) :
+  f == 2 ? ( v < 1 ? sprintf(#g_val, "%.0f ms", v * 1000) : sprintf(#g_val, "%.2f s", v) ) :
+  f == 3 ? sprintf(#g_val, "%d", floor(v + 0.5)) :
+  f == 4 ? sprintf(#g_val, "%.1f ct", v) :
+  f == 5 ? sprintf(#g_val, "%.1f dB", v) :
+  f == 6 ? sprintf(#g_val, "%.2f oct", v) :
+  f == 7 ? sprintf(#g_val, "%.1f st", v) :
+  f == 8 ? sprintf(#g_val, "%.0f %%", v * 100) :
+  f == 9 ? sprintf(#g_val, "%.2f Hz", v) :
+  f == 10 ? ( v < 0.0001 ? strcpy(#g_val, "-inf dB") : sprintf(#g_val, "%.1f dB", 20 * log10(v)) ) :
+  sprintf(#g_val, "%.2f", v);
+  #g_val;
+);
+
+// widgets: 0 knob, 1 value box, 2 choice
+function g_add(kind, sl, mn, mx, lg, df, f, x, y, w, col, lbl) (
+  g_wkind[g_nw] = kind; g_wsl[g_nw] = sl; g_wmin[g_nw] = mn; g_wmax[g_nw] = mx; g_wlog[g_nw] = lg;
+  g_wdef[g_nw] = df; g_wfmt[g_nw] = f; g_wx[g_nw] = x; g_wy[g_nw] = y; g_ww[g_nw] = w; g_wcol[g_nw] = col;
+  strcpy(100 + g_nw, lbl); g_nw += 1;
+);
+function g_knob(sl, mn, mx, lg, df, f, cx, cy, col, lbl) ( g_add(0, sl, mn, mx, lg, df, f, cx, cy, 0, col, lbl); );
+function g_box(sl, mn, mx, lg, df, f, x, y, w, col, lbl) ( g_add(1, sl, mn, mx, lg, df, f, x, y, w, col, lbl); );
+function g_choice(sl, cnt, x, y, w, col) ( g_add(2, sl, 0, cnt - 1, 0, 0, 0, x, y, w, col, ""); );
+
+function g_item(sl, v) (
+  (sl == 1 || sl == 4) ? ( v == 0 ? "Sine" : v == 1 ? "Triangle" : v == 2 ? "Saw" : "Pulse" ) :
+  sl == 9 ? ( v == 0 ? "Low-pass" : v == 1 ? "High-pass" : "Band-pass" ) :
+  ( v == 0 ? "Sine" : v == 1 ? "Triangle" : v == 2 ? "Saw down" : v == 3 ? "Square" : "Random" );
+);
+function g_optname(sl, v) (
+  (sl == 1 || sl == 4) ? ( v == 0 ? "Sine" : v == 1 ? "Triangle" : v == 2 ? "Saw" : "Pulse" ) :
+  sl == 9 ? ( v == 0 ? "LP" : v == 1 ? "HP" : "BP" ) :
+  ( v == 0 ? "Sine" : v == 1 ? "Triangle" : v == 2 ? "Saw down" : v == 3 ? "Square" : "Random" );
+);
+
+// one cycle of a wave or LFO shape, drawn into a box
+function g_shape(wave, lfo, x, y, w, h) local(i, t, v, px, py, nx, ny) (
+  i = 0;
+  loop(w,
+    t = i / w;
+    v = lfo ? (
+      wave == 0 ? sin(2 * $pi * t) : wave == 1 ? 1 - 4 * abs(t - 0.5) : wave == 2 ? 1 - 2 * t :
+      wave == 3 ? (t < 0.5 ? 1 : -1) : ((floor(t * 6) * 3) % 5) / 2 - 1
+    ) : (
+      wave == 0 ? sin(2 * $pi * t) : wave == 1 ? 1 - 4 * abs(t - 0.5) : wave == 2 ? 2 * t - 1 :
+      (t < slider3 ? 1 : -1)
+    );
+    nx = (x + i) * g_s; ny = (y + h / 2 - v * h * 0.42) * g_s;
+    i > 0 ? gfx_line(px, py, nx, ny, 1);
+    px = nx; py = ny; i += 1;
+  );
+);
+
+// an envelope: attack, decay, a held sustain, release; handles at the corners like Drift
+function g_env(x, y, w, h, a, d, s, r, col, bright) local(ta, td, th, tr, sc, x1, x2, x3) (
+  ta = sqrt(a); td = sqrt(d); th = 0.6; tr = sqrt(r);
+  sc = w / (ta + td + th + tr);
+  x1 = x + ta * sc; x2 = x1 + td * sc; x3 = x2 + th * sc;
+  c_pick(col); gfx_a = bright ? 1 : 0.35;
+  gfx_line(x * g_s, (y + h) * g_s, x1 * g_s, y * g_s, 1);
+  gfx_line(x1 * g_s, y * g_s, x2 * g_s, (y + h - s * h) * g_s, 1);
+  gfx_line(x2 * g_s, (y + h - s * h) * g_s, x3 * g_s, (y + h - s * h) * g_s, 1);
+  gfx_line(x3 * g_s, (y + h - s * h) * g_s, (x + w) * g_s, (y + h) * g_s, 1);
+  bright ? (
+    c_pick(1);
+    gfx_rect(x1 * g_s - 3 * g_s, y * g_s - 3 * g_s, 6 * g_s, 6 * g_s, 0);
+    gfx_rect(x2 * g_s - 3 * g_s, (y + h - s * h) * g_s - 3 * g_s, 6 * g_s, 6 * g_s, 0);
+    gfx_rect((x + w) * g_s - 3 * g_s, (y + h) * g_s - 3 * g_s, 6 * g_s, 6 * g_s, 0);
+  );
+  gfx_a = 1;
+);
+
+function g_panel(x, y, w, h) ( c_panel(); gfx_rect(x * g_s, y * g_s, w * g_s, h * g_s); );
+function g_well(x, y, w, h) ( c_well(); gfx_rect(x * g_s, y * g_s, w * g_s, h * g_s); );
+function g_square(x, y, txt, col) (
+  c_pick(col); gfx_rect(x * g_s, y * g_s, 18 * g_s, 24 * g_s);
+  gfx_setfont(1); c_ink(); g_ctext(txt, (x + 9) * g_s, (y + 4) * g_s);
+);
+
+// the layout, in units of a 1060 x 250 window
+g_init == 0 ? (
+  g_init = 1; g_envsel = 0;
+  g_base = 40000;
+  g_wkind = g_base; g_wsl = g_base + 64; g_wmin = g_base + 128; g_wmax = g_base + 192; g_wlog = g_base + 256;
+  g_wdef = g_base + 320; g_wfmt = g_base + 384; g_wx = g_base + 448; g_wy = g_base + 512; g_ww = g_base + 576;
+  g_wcol = g_base + 640;
+  g_nw = 0; g_drag = -1;
+
+  // Osc 1, Osc 2, Pitch Mod
+  g_choice(1, 4, 56, 46, 40, 1);
+  g_knob(2, -2, 2, 0, 0, 3, 130, 58, 1, "Oct");
+  g_knob(3, 0.05, 0.95, 0, 0.5, 8, 195, 58, 0, "Shape");
+  g_choice(4, 4, 56, 116, 40, 2);
+  g_knob(5, -2, 2, 0, 0, 3, 130, 128, 2, "Oct");
+  g_knob(6, -100, 100, 0, 7, 4, 205, 128, 2, "Detune");
+  g_box(22, -24, 24, 0, 0, 7, 14, 222, 56, 1, "Env 2");
+  g_box(25, 0, 100, 0, 0, 4, 78, 222, 56, 2, "LFO");
+  // Osc Mix
+  g_knob(7, 0, 1, 0, 0.5, 10, 330, 58, 1, "Osc 1");
+  g_knob(31, 0, 1, 0, 0.5, 10, 330, 128, 2, "Osc 2");
+  g_knob(8, 0, 1, 0, 0, 10, 330, 206, 3, "Noise");
+  // Filter
+  g_knob(10, 20, 18000, 1, 1200, 1, 410, 62, 2, "Freq");
+  g_choice(9, 3, 458, 42, 50, 1);
+  g_box(12, 0, 1, 0, 0.5, 0, 458, 86, 50, 0, "Key");
+  g_knob(11, 0, 1, 0, 0.2, 8, 410, 150, 0, "Res");
+  g_box(13, -6, 6, 0, 2, 6, 376, 222, 64, 2, "Env 2");
+  g_box(26, 0, 4, 0, 0, 6, 446, 222, 64, 2, "LFO");
+  // Envelopes: 1 = amp, 2 = mod
+  g_knob(14, 0.001, 5, 1, 0.005, 2, 572, 58, 0, "Attack");
+  g_knob(15, 0.001, 5, 1, 0.3, 2, 636, 58, 0, "Decay");
+  g_knob(16, 0, 1, 0, 0.7, 8, 700, 58, 2, "Sustain");
+  g_knob(17, 0.001, 8, 1, 0.4, 2, 764, 58, 0, "Release");
+  g_knob(18, 0.001, 5, 1, 0.001, 2, 572, 200, 0, "Attack");
+  g_knob(19, 0.001, 5, 1, 0.4, 2, 636, 200, 0, "Decay");
+  g_knob(20, 0, 1, 0, 0, 8, 700, 200, 2, "Sustain");
+  g_knob(21, 0.001, 8, 1, 0.4, 2, 764, 200, 0, "Release");
+  // LFO
+  g_knob(23, 0.01, 30, 1, 4, 9, 862, 58, 0, "Rate");
+  g_choice(24, 5, 836, 102, 84, 0);
+  g_knob(27, 0, 0.45, 0, 0, 8, 862, 200, 2, "PW");
+  // global
+  g_box(28, 0, 1, 0, 0.3, 8, 946, 120, 100, 2, "Drift");
+  g_knob(30, -48, 6, 0, -12, 5, 996, 182, 2, "Volume");
+  g_box(29, 0, 1, 0, 0.5, 8, 946, 64, 100, 2, "Vel > Vol");
+);
+
+g_s = min(gfx_w / 1060, gfx_h / 250);
+gfx_setfont(1, "Avenir Next", 12.5 * g_s, 'b');
+gfx_setfont(2, "Avenir Next", 12.5 * g_s);
+gfx_setfont(3, "Avenir Next", 11.5 * g_s);
+gfx_setfont(4, "Avenir Next", 14 * g_s, 'b');
+
+// ---- mouse, in layout units
+g_mxu = mouse_x / g_s; g_myu = mouse_y / g_s;
+g_down = mouse_cap & 1; g_fine = mouse_cap & 8;
+g_hw = -1; g_i = 0;
+loop(g_nw,
+  g_wkind[g_i] == 0 ? (
+    ((g_mxu - g_wx[g_i]) ^ 2 + (g_myu - g_wy[g_i]) ^ 2 < 22 ^ 2) ? g_hw = g_i;
+  ) : (
+    (g_mxu >= g_wx[g_i] && g_mxu <= g_wx[g_i] + g_ww[g_i] && g_myu >= g_wy[g_i] && g_myu <= g_wy[g_i] + 18) ? g_hw = g_i;
+  );
+  g_i += 1;
+);
+g_down && !g_lastdown ? (
+  g_now = time_precise();
+  g_hw >= 0 ? (
+    g_wkind[g_hw] == 2 ? (
+      // a choice: REAPER's own menu, the current item ticked
+      strcpy(#g_menu, ""); g_j = 0;
+      loop(g_wmax[g_hw] + 1,
+        g_j > 0 ? strcat(#g_menu, "|");
+        slider(g_wsl[g_hw]) == g_j ? strcat(#g_menu, "!");
+        strcat(#g_menu, g_item(g_wsl[g_hw], g_j));
+        g_j += 1;
+      );
+      gfx_x = mouse_x; gfx_y = mouse_y;
+      g_pick = gfx_showmenu(#g_menu);
+      g_pick > 0 ? g_set(g_wsl[g_hw], g_pick - 1);
+    ) : (
+      g_now - g_clickt < 0.3 && g_clickw == g_hw ? ( g_set(g_wsl[g_hw], g_wdef[g_hw]); g_drag = -1; ) : (
+        g_drag = g_hw; g_y0 = g_myu; g_t0 = g_norm(g_hw, slider(g_wsl[g_hw]));
+      );
+      g_clickt = g_now; g_clickw = g_hw;
+    );
+  ) : (
+    // the envelope tabs
+    (g_mxu >= 530 && g_mxu <= 548 && g_myu >= 96 && g_myu <= 120) ? g_envsel = 0;
+    (g_mxu >= 530 && g_mxu <= 548 && g_myu >= 138 && g_myu <= 162) ? g_envsel = 1;
+  );
+);
+g_down && g_drag >= 0 ? (
+  g_v = g_denorm(g_drag, g_t0 + (g_y0 - g_myu) / (g_fine ? 900 : 180));
+  g_wfmt[g_drag] == 3 ? g_v = floor(g_v + 0.5);
+  g_v != slider(g_wsl[g_drag]) ? g_set(g_wsl[g_drag], g_v);
+);
+!g_down ? g_drag = -1;
+mouse_wheel != 0 && g_hw >= 0 && g_wkind[g_hw] != 2 ? (
+  g_v = g_denorm(g_hw, g_norm(g_hw, slider(g_wsl[g_hw])) + mouse_wheel / 120 * (g_fine ? 0.005 : 0.03));
+  g_wfmt[g_hw] == 3 ? g_v = floor(g_v + 0.5);
+  g_set(g_wsl[g_hw], g_v);
+);
+mouse_wheel = 0;
+g_lastdown = g_down;
+
+// ---- frame, header bar and column panels
+c_frame(); gfx_rect(0, 0, gfx_w, gfx_h);
+c_head(); gfx_rect(0, 0, gfx_w, 22 * g_s);
+c_pick(1); gfx_circle(14 * g_s, 11 * g_s, 6 * g_s, 1, 1);
+c_ink(); gfx_circle(14 * g_s, 11 * g_s, 6 * g_s, 0, 1);
+gfx_setfont(4); c_ink(); g_text("Wander", 26 * g_s, 3 * g_s);
+gfx_setfont(2);
+g_ctext("Osc Mix", 318 * g_s, 4 * g_s); g_ctext("Filter", 443 * g_s, 4 * g_s);
+g_ctext("Envelopes", 672 * g_s, 4 * g_s); g_ctext("LFO", 878 * g_s, 4 * g_s);
+// voices: one dot per voice, lit while it sounds
+g_i = 0;
+loop(VN, v_astg[g_i] > 0 ? c_pick(1) : c_ink(); gfx_circle((960 + g_i * 11) * g_s, 11 * g_s, 3 * g_s, 1, 1); g_i += 1; );
+
+g_panel(6, 26, 262, 68); g_panel(6, 96, 262, 70); g_panel(6, 168, 262, 78);
+g_panel(272, 26, 92, 220);
+g_panel(368, 26, 150, 220);
+g_panel(522, 26, 300, 68); g_well(526, 96, 292, 70); g_panel(522, 168, 300, 78);
+g_panel(826, 26, 104, 68); g_well(826, 96, 104, 70); g_panel(826, 168, 104, 78);
+g_panel(934, 26, 120, 220);
+
+// fixed labels
+gfx_setfont(2); c_label();
+g_text("Osc 1", 14 * g_s, 50 * g_s); g_text("Osc 2", 14 * g_s, 120 * g_s); g_text("Pitch Mod", 14 * g_s, 176 * g_s);
+g_text("Freq Mod", 376 * g_s, 186 * g_s);
+g_text("1", 530 * g_s, 34 * g_s); g_text("2", 530 * g_s, 176 * g_s);
+g_text("Mode", 946 * g_s, 30 * g_s);
+c_value(); g_text("Poly  ·  8", 946 * g_s, 44 * g_s);
+g_square(278, 46, "1", 1); g_square(278, 116, "2", 2); g_square(278, 194, "N", 3);
+
+// pitch mod display: the LFO shape that bends the pitch
+g_well(144, 182, 116, 56);
+c_value(); g_shape(slider24, 1, 150, 186, 104, 48);
+
+// envelope display: both, the selected one bright, tabs 1 and 2
+g_env(556, 104, 254, 54, slider14, slider15, slider16, slider17, 2, g_envsel == 0);
+g_env(556, 104, 254, 54, slider18, slider19, slider20, slider21, 2, g_envsel == 1);
+g_envsel == 0 ? c_pick(2) : c_track(); gfx_rect(530 * g_s, 100 * g_s, 18 * g_s, 22 * g_s, g_envsel == 0);
+g_envsel == 1 ? c_pick(2) : c_track(); gfx_rect(530 * g_s, 140 * g_s, 18 * g_s, 22 * g_s, g_envsel == 1);
+gfx_setfont(1); c_ink(); g_envsel == 0 ? c_ink() : c_pick(2); g_ctext("1", 539 * g_s, 103 * g_s);
+g_envsel == 1 ? c_ink() : c_pick(2); g_ctext("2", 539 * g_s, 143 * g_s);
+
+// LFO display
+c_pick(2); g_shape(slider24, 1, 832, 126, 92, 36);
+
+// scope: the output, from a rising zero crossing so a steady tone stands still
+g_start = sc_pos - 1400; g_start < 0 ? g_start += sc_len;
+g_j = 0; g_found = 0;
+while (g_j < 800 && !g_found) (
+  g_a = sc_buf[(g_start + g_j) % sc_len]; g_b = sc_buf[(g_start + g_j + 1) % sc_len];
+  g_a <= 0 && g_b > 0 ? g_found = 1 : g_j += 1;
+);
+g_start = (g_start + g_j) % sc_len;
+g_well(946, 220, 100, 22);
+c_pick(1); g_j = 0;
+loop(100,
+  g_a = sc_buf[(g_start + g_j * 3) % sc_len]; g_b = sc_buf[(g_start + g_j * 3 + 3) % sc_len];
+  gfx_line((946 + g_j) * g_s, (231 - g_a * 10) * g_s, (947 + g_j) * g_s, (231 - g_b * 10) * g_s, 1);
+  g_j += 1;
+);
+
+// ---- widgets
+g_i = 0;
+loop(g_nw,
+  g_v = slider(g_wsl[g_i]);
+  g_kind = g_wkind[g_i];
+  g_kind == 0 ? (
+    // knob: a thick track, the value arc in the column colour, a needle from the centre
+    g_cx = g_wx[g_i] * g_s; g_cy = g_wy[g_i] * g_s; g_r = 15 * g_s;
+    g_a0 = -0.75 * $pi; g_a1 = 0.75 * $pi;
+    g_ang = g_a0 + max(0, min(1, g_norm(g_i, g_v))) * (g_a1 - g_a0);
+    g_z = (g_wmin[g_i] < 0 && g_wmax[g_i] > 0) ? g_a0 + g_norm(g_i, 0) * (g_a1 - g_a0) : g_a0;
+    c_track();
+    g_k = 0; loop(3, gfx_arc(g_cx, g_cy, g_r - g_k, g_a0, g_a1, 1); g_k += 1; );
+    c_pick(g_wcol[g_i]);
+    (g_hw == g_i || g_drag == g_i) ? gfx_a = 1 : gfx_a = 0.92;
+    g_lo = min(g_z, g_ang); g_hi = max(g_z, g_ang);
+    g_hi - g_lo > 0.01 ? ( g_k = 0; loop(3, gfx_arc(g_cx, g_cy, g_r - g_k, g_lo, g_hi, 1); g_k += 1; ); );
+    gfx_line(g_cx, g_cy, g_cx + sin(g_ang) * (g_r - 1), g_cy - cos(g_ang) * (g_r - 1), 1);
+    gfx_line(g_cx + 1, g_cy, g_cx + 1 + sin(g_ang) * (g_r - 1), g_cy - cos(g_ang) * (g_r - 1), 1);
+    gfx_a = 1;
+    gfx_setfont(2); c_label(); g_ctext(100 + g_i, g_cx, g_cy - 34 * g_s);
+    gfx_setfont(3); g_wcol[g_i] == 0 ? c_value() : c_pick(g_wcol[g_i]);
+    g_ctext(g_fmt(g_i, g_v), g_cx, g_cy + 18 * g_s);
+  ) : g_kind == 1 ? (
+    // value box: a dark field filled to the value, the number in it
+    g_x = g_wx[g_i] * g_s; g_y = g_wy[g_i] * g_s; g_w = g_ww[g_i] * g_s; g_h = 18 * g_s;
+    gfx_setfont(2); c_label(); g_text(100 + g_i, g_x, g_y - 16 * g_s);
+    c_well(); gfx_rect(g_x, g_y, g_w, g_h);
+    g_t = max(0, min(1, g_norm(g_i, g_v)));
+    g_z = (g_wmin[g_i] < 0 && g_wmax[g_i] > 0) ? g_norm(g_i, 0) : 0;
+    c_pick(g_wcol[g_i]); gfx_a = 0.55;
+    gfx_rect(g_x + min(g_z, g_t) * g_w, g_y, abs(g_t - g_z) * g_w, g_h);
+    gfx_a = 1;
+    gfx_setfont(3); c_value(); g_ctext(g_fmt(g_i, g_v), g_x + g_w / 2, g_y + 2 * g_s);
+  ) : (
+    // choice: the wave as an icon (oscillators) or its name, with a small arrow
+    g_x = g_wx[g_i] * g_s; g_y = g_wy[g_i] * g_s; g_w = g_ww[g_i] * g_s;
+    g_wsl[g_i] == 9 ? (
+      c_pick(1); gfx_rect(g_x, g_y, g_w, 20 * g_s);
+      gfx_setfont(1); c_ink(); g_ctext(g_optname(9, g_v), g_x + g_w / 2, g_y + 3 * g_s);
+      gfx_setfont(2); c_label(); g_ctext("Type", g_x + g_w / 2, g_y - 16 * g_s);
+    ) : (g_wsl[g_i] == 1 || g_wsl[g_i] == 4) ? (
+      c_pick(g_wcol[g_i]); g_shape(g_v, 0, g_wx[g_i], g_wy[g_i] + 2, 26, 16);
+      gfx_triangle(g_x + 30 * g_s, g_y + 8 * g_s, g_x + 38 * g_s, g_y + 8 * g_s, g_x + 34 * g_s, g_y + 13 * g_s);
+    ) : (
+      gfx_setfont(1); c_pick(1); g_text(g_optname(g_wsl[g_i], g_v), g_x, g_y);
+      gfx_triangle(g_x + g_w - 10 * g_s, g_y + 6 * g_s, g_x + g_w - 2 * g_s, g_y + 6 * g_s, g_x + g_w - 6 * g_s, g_y + 11 * g_s);
+    );
+  );
+  g_i += 1;
+);

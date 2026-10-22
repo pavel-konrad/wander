@@ -1,0 +1,6 @@
+build/
+external/
+*.wav
+*.png
+!docs/*.png
+.DS_Store
