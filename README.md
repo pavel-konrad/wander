@@ -93,5 +93,6 @@ same order in both (`src/Params.h`), so a recipe works in either.
 
 ## Licence
 
-Wander's code by Pavel Konrád; the licence for it is not chosen yet. It is built with JUCE 8, which
-is available under the AGPLv3 or the JUCE licence (see juce.com).
+Wander is open source under the **GNU Affero General Public License v3** (`LICENSE`), © Pavel Konrád.
+You may use, study, change and share it; a changed version you distribute (or offer over a network)
+must stay under the same licence with its source. It is built with JUCE 8, used under the AGPLv3.
