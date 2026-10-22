@@ -37,6 +37,10 @@ in each zip (`INSTALL.txt`) and below.
 | Windows | `Wander.vst3` (a folder) | `C:\Program Files\Common Files\VST3\` |
 | REAPER (any system) | `wander-synth.jsfx` | REAPER's resource path (*Options > Show REAPER resource path*) `Effects/Kurz/` |
 
+**No `VST3` folder yet?** Make it; every DAW looks there (Ableton with *Use VST3 Plug-In System
+Folders* on). macOS: `mkdir -p ~/Library/Audio/Plug-Ins/VST3 ~/Library/Audio/Plug-Ins/Components`.
+Windows: create the folder `VST3` in `C:\Program Files\Common Files\`.
+
 **macOS:** Wander is not signed with an Apple Developer ID, so macOS blocks it after downloading. Run
 once in Terminal:
 
@@ -53,7 +57,10 @@ Then restart the DAW. **Ableton Live:** *Settings > Plug-Ins > Use VST3 Plug-In 
 ### Instalace (česky)
 
 1. Stáhni zip pro svůj systém z [Releases](https://github.com/pavel-konrad/wander/releases/latest).
-2. **Mac:** `Wander.vst3` zkopíruj do `~/Library/Audio/Plug-Ins/VST3/`, `Wander.component` do
+2. Když složka `VST3` neexistuje, vytvoř ji (Mac: v Terminálu
+   `mkdir -p ~/Library/Audio/Plug-Ins/VST3 ~/Library/Audio/Plug-Ins/Components`; Windows: složka
+   `VST3` v `C:\Program Files\Common Files\`).
+   **Mac:** `Wander.vst3` zkopíruj do `~/Library/Audio/Plug-Ins/VST3/`, `Wander.component` do
    `~/Library/Audio/Plug-Ins/Components/` (ve Finderu *Otevřít > Otevřít složku…* a vlož cestu).
    Pak jednou v Terminálu příkaz `xattr …` z odstavce výš, jinak ho macOS zablokuje.
    **Windows:** složku `Wander.vst3` zkopíruj do `C:\Program Files\Common Files\VST3\`.

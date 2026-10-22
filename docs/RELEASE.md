@@ -7,7 +7,7 @@ and drift, laid out like Ableton's Drift.
 | `Wander-Windows.zip` | Windows 64-bit: VST3 and a standalone app |
 | `Wander-REAPER-JSFX.zip` | REAPER only: the JSFX version with its presets |
 
-Each zip has an `INSTALL.txt`. Short version:
+Each zip has an `INSTALL.txt`. Short version (if a `VST3` folder does not exist yet, create it):
 
 - **macOS:** `Wander.vst3` to `~/Library/Audio/Plug-Ins/VST3/`, `Wander.component` to
   `~/Library/Audio/Plug-Ins/Components/`, then once in Terminal:

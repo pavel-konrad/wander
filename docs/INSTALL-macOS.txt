@@ -1,6 +1,8 @@
 Wander for macOS (Apple Silicon and Intel)
 
-1. Copy the plugins into your user plugin folders (in Finder: Go > Go to Folder..., paste the path):
+1. If the folders do not exist yet (a fresh Mac, only Ableton installed), make them; in Terminal:
+     mkdir -p ~/Library/Audio/Plug-Ins/VST3 ~/Library/Audio/Plug-Ins/Components
+   Then copy the plugins into them (in Finder: Go > Go to Folder..., paste the path):
      Wander.vst3       ->  ~/Library/Audio/Plug-Ins/VST3/
      Wander.component  ->  ~/Library/Audio/Plug-Ins/Components/
    Wander.app is the same synth as a standalone app; put it anywhere (Applications).

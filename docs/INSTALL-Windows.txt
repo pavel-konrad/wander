@@ -2,6 +2,7 @@ Wander for Windows (64-bit)
 
 1. Copy the folder Wander.vst3 to
      C:\Program Files\Common Files\VST3\
+   If there is no VST3 folder in C:\Program Files\Common Files\ yet, create it (name: VST3).
    (Windows asks for administrator permission; allow it.)
    Wander.exe is the same synth as a standalone app; put it anywhere.
 
